@@ -1,0 +1,22 @@
+name: review
+on:
+  # Only the shared base-owned wrapper receives privileged events. It never
+  # runs the PR checkout on the host; the head is sandbox input, not code.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+permissions: {}
+jobs:
+  review:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    uses: cgwalters-forge/actions/.github/workflows/cgwalters-review.yml@5906e6745c4e3e1c68b698dacf409a452c727d08
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+      actions: read
+      id-token: write
+      statuses: write
