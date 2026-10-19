@@ -1,0 +1,4 @@
+[exempt]
+"ci.yml" = "Ordinary Rust tests and shared workflow lint, with a read-only token and no secrets."
+"review.yml" = "Privileged events call only the pinned shared review wrapper; PR code is sandbox data."
+"release.yml" = "Trusted tag build needs OIDC for provenance and contents write for release assets; never runs for PRs."

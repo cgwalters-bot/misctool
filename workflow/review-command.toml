@@ -1,0 +1,18 @@
+# Only repository writers may spend the agent budget with /review.
+hosts = ["github.com"]
+repos = ["cgwalters-forge/misctool"]
+bases = ["main"]
+max_outputs = 1
+max_patch_bytes = 1024
+max_patch_files = 1
+
+[outputs]
+add_comment = { max = 1 }
+noop = { max = 1 }
+
+[trigger]
+events = ["issue_comment"]
+roles = ["admin", "maintain", "write"]
+bots = []
+forks = true
+commands = ["/review"]
