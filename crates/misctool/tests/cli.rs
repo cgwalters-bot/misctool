@@ -9,6 +9,7 @@ fn help_and_invalid_arguments() {
     for (args, expected) in [
         (vec!["--help"], "gh-pr-checks"),
         (vec!["--help"], "acp-tools"),
+        (vec!["--help"], "operator-issue-diff"),
         (vec!["gh-pr-checks", "--help"], "gh-pr-checks"),
         (vec!["acp-tools", "--help"], "acp-tools"),
     ] {
@@ -256,4 +257,70 @@ fn gh_arguments_output_and_exit_status() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("could not run gh"));
     std::fs::remove_dir(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn operator_issue_diff_with_faked_graphql() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("misctool-issue-diff-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let gh = dir.join("gh");
+    // Records the arguments after the query and replays a recorded response.
+    std::fs::write(
+        &gh,
+        "#!/bin/sh\nshift 4\nprintf '%s\\n' \"$@\" >&2\n/bin/cat \"$TEST_RESPONSE\"\nexit \"$TEST_EXIT\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let response = dir.join("response.json");
+    let changed = r#"{"data":{"repository":{"issue":{"body":"a\nc","userContentEdits":{"nodes":[{"editedAt":"2026-10-02T00:00:00Z","deletedAt":null,"diff":"a\nc"},{"editedAt":"2026-10-01T00:00:00Z","deletedAt":null,"diff":"a\nb"}]}}}}}"#;
+    let unchanged = r#"{"data":{"repository":{"issue":{"body":"a\nc","userContentEdits":{"nodes":[{"editedAt":"2026-10-02T00:00:00Z","deletedAt":null,"diff":"a\nc"},{"editedAt":"2026-10-01T00:00:00Z","deletedAt":null,"diff":"a\nc"}]}}}}}"#;
+    let unedited =
+        r#"{"data":{"repository":{"issue":{"body":"a","userContentEdits":{"nodes":[]}}}}}"#;
+    for (body, gh_exit, code, stdout) in [
+        (
+            changed,
+            0,
+            1,
+            "--- 2026-10-01T00:00:00Z\n+++ 2026-10-02T00:00:00Z\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n",
+        ),
+        (unchanged, 0, 0, "no change between the last two edits\n"),
+        (
+            unedited,
+            0,
+            0,
+            "fewer than two edits of the issue body; nothing to compare\n",
+        ),
+        (r#"{"errors":[{"message":"x"}]}"#, 1, 2, ""),
+    ] {
+        std::fs::write(&response, body).unwrap();
+        let output = cli()
+            .args(["operator-issue-diff", "example/123#42"])
+            .env("PATH", &dir)
+            .env("TEST_RESPONSE", &response)
+            .env("TEST_EXIT", gh_exit.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), stdout);
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .starts_with("-f\nowner=example\n-f\nname=123\n-F\nnumber=42\n")
+        );
+    }
+    for args in [
+        vec!["operator-issue-diff"],
+        vec!["operator-issue-diff", "a/b"],
+        vec!["operator-issue-diff", "a/b#1", "extra"],
+    ] {
+        assert_eq!(cli().args(args).status().unwrap().code(), Some(2));
+    }
+    let output = cli()
+        .args(["operator-issue-diff", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("userContentEdits"));
+    std::fs::remove_dir_all(dir).unwrap();
 }

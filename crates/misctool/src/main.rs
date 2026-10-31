@@ -1,5 +1,6 @@
 mod acp_tools;
 mod gh_pr_checks;
+mod operator_issue_diff;
 mod review_corpus;
 
 use std::process::ExitCode;
@@ -9,9 +10,10 @@ const HELP: &str = "Small, read-only tools for operator workflows.
 Usage: cgwalters-forge-misctool <COMMAND>
 
 Commands:
-  acp-tools -- ADAPTER...     List the commands an ACP adapter offers
-  gh-pr-checks OWNER/REPO#N   Show a pull request's checks using gh
-  review-corpus             Collect public review feedback or summarize JSONL
+  acp-tools -- ADAPTER...            List the commands an ACP adapter offers
+  gh-pr-checks OWNER/REPO#N          Show a pull request's checks using gh
+  operator-issue-diff OWNER/REPO#N   Diff the last two edits of an issue body
+  review-corpus                      Collect public review feedback or summarize JSONL
 
 Options:
   -h, --help     Print help
@@ -30,6 +32,7 @@ fn run() -> Result<u8, String> {
         }
         Some("acp-tools") => acp_tools::run(&args[1..]),
         Some("gh-pr-checks") => gh_pr_checks::run(&args[1..]),
+        Some("operator-issue-diff") => operator_issue_diff::run(&args[1..]),
         Some("review-corpus") => review_corpus::run(&args[1..]),
         _ => Err(format!("expected a subcommand; use --help\n\n{HELP}")),
     }
