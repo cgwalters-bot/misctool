@@ -12,6 +12,17 @@ status (0 passing, 1 failed, 8 pending). Install and authenticate the GitHub CLI
 first, or provide `GH_TOKEN` in the environment. It does not poll, write to
 GitHub or manage credentials. `--help` works without authentication.
 
+```sh
+cgwalters-forge-misctool acp-tools [--json] [--timeout SECONDS] -- ADAPTER [ARGS...]
+```
+
+`acp-tools` spawns an ACP adapter over stdio, sends `initialize` and
+`session/new`, and waits (30 seconds by default, at most 600) for its
+`available_commands_update`. It prints the adapter's `agentCapabilities` and
+the offered command names, as plain text or with `--json` as one JSON object.
+It exits 1 on timeout, adapter exit or a JSON-RPC error. It adds no network
+access or credentials of its own; the adapter inherits the environment.
+
 ## Development
 
 Run `just check` (formatting, Clippy with warnings denied, and tests).

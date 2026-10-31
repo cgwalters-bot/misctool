@@ -1,3 +1,4 @@
+mod acp_tools;
 mod gh_pr_checks;
 
 use std::process::ExitCode;
@@ -7,6 +8,7 @@ const HELP: &str = "Small, read-only tools for operator workflows.
 Usage: cgwalters-forge-misctool <COMMAND>
 
 Commands:
+  acp-tools -- ADAPTER...     List the commands an ACP adapter offers
   gh-pr-checks OWNER/REPO#N   Show a pull request's checks using gh
 
 Options:
@@ -24,6 +26,7 @@ fn run() -> Result<u8, String> {
             println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
+        Some("acp-tools") => acp_tools::run(&args[1..]),
         Some("gh-pr-checks") => gh_pr_checks::run(&args[1..]),
         _ => Err(format!("expected a subcommand; use --help\n\n{HELP}")),
     }
