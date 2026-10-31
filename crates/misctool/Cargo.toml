@@ -4,3 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+serde_json = "1.0.154"
+similar = "3.2.1"

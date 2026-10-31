@@ -1,4 +1,5 @@
 mod gh_pr_checks;
+mod operator_issue_diff;
 
 use std::process::ExitCode;
 
@@ -7,7 +8,8 @@ const HELP: &str = "Small, read-only tools for operator workflows.
 Usage: cgwalters-forge-misctool <COMMAND>
 
 Commands:
-  gh-pr-checks OWNER/REPO#N   Show a pull request's checks using gh
+  gh-pr-checks OWNER/REPO#N          Show a pull request's checks using gh
+  operator-issue-diff OWNER/REPO#N   Diff the last two edits of an issue body
 
 Options:
   -h, --help     Print help
@@ -25,6 +27,7 @@ fn run() -> Result<u8, String> {
             Ok(0)
         }
         Some("gh-pr-checks") => gh_pr_checks::run(&args[1..]),
+        Some("operator-issue-diff") => operator_issue_diff::run(&args[1..]),
         _ => Err(format!("expected a subcommand; use --help\n\n{HELP}")),
     }
 }

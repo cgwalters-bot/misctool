@@ -8,8 +8,9 @@ Uses gh's existing authentication (including GH_TOKEN). Output is passed
 through unchanged. Exit codes follow gh pr checks: 0 success, 1 failure,
 8 pending; invocation errors use 2. No polling or writes are performed.";
 
-fn parse_target(target: &str) -> Result<(&str, u64), String> {
-    let invalid = || "expected OWNER/REPO#N with a positive pull request number".to_string();
+pub(crate) fn parse_target(target: &str) -> Result<(&str, u64), String> {
+    let invalid =
+        || "expected OWNER/REPO#N with a positive issue or pull request number".to_string();
     let (repo, number) = target.rsplit_once('#').ok_or_else(invalid)?;
     let (owner, name) = repo.split_once('/').ok_or_else(invalid)?;
     // A repository argument is data, not a gh option, host or URL.

@@ -5,12 +5,20 @@ A small Rust toolbox, installed as `cgwalters-forge-misctool`.
 ```sh
 cargo install --path crates/misctool
 cgwalters-forge-misctool gh-pr-checks OWNER/REPO#123
+cgwalters-forge-misctool operator-issue-diff OWNER/REPO#123
 ```
 
 `gh-pr-checks` invokes `gh pr checks` once, preserving its output and exit
 status (0 passing, 1 failed, 8 pending). Install and authenticate the GitHub CLI
 first, or provide `GH_TOKEN` in the environment. It does not poll, write to
 GitHub or manage credentials. `--help` works without authentication.
+
+`operator-issue-diff OWNER/REPO#N` reads an issue body's edit history
+(GraphQL `userContentEdits`) through `gh api graphql` and prints a unified diff
+between the last two edits. It exits 0 when they match or there are fewer
+than two edits (and says so), 1 when the body changed, and 2 on errors such as
+a bad reference or a failed query. Like `gh-pr-checks` it only reads, using
+gh's authentication or `GH_TOKEN`.
 
 ## Development
 
