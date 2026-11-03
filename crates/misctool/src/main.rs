@@ -1,4 +1,5 @@
 mod gh_pr_checks;
+mod review_corpus;
 
 use std::process::ExitCode;
 
@@ -8,6 +9,7 @@ Usage: cgwalters-forge-misctool <COMMAND>
 
 Commands:
   gh-pr-checks OWNER/REPO#N   Show a pull request's checks using gh
+  review-corpus             Collect public review feedback or summarize JSONL
 
 Options:
   -h, --help     Print help
@@ -25,6 +27,7 @@ fn run() -> Result<u8, String> {
             Ok(0)
         }
         Some("gh-pr-checks") => gh_pr_checks::run(&args[1..]),
+        Some("review-corpus") => review_corpus::run(&args[1..]),
         _ => Err(format!("expected a subcommand; use --help\n\n{HELP}")),
     }
 }
