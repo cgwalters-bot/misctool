@@ -12,14 +12,65 @@ fn help_and_invalid_arguments() {
         assert!(String::from_utf8_lossy(&output.stdout).contains("gh-pr-checks"));
     }
     for args in [
+        vec!["review-corpus", "--help"],
+        vec!["review-corpus", "collect", "--help"],
+        vec!["review-corpus", "stats", "--help"],
+    ] {
+        let output = cli().args(args).output().unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("review-corpus"));
+    }
+    for args in [
         vec![],
         vec!["unknown"],
+        vec!["review-corpus"],
+        vec!["review-corpus", "collect"],
+        vec!["review-corpus", "stats"],
         vec!["gh-pr-checks"],
         vec!["gh-pr-checks", "a/b#0"],
         vec!["gh-pr-checks", "a/b#1", "extra"],
     ] {
         assert_eq!(cli().args(args).status().unwrap().code(), Some(2));
     }
+}
+
+#[test]
+fn corpus_and_state_path_aliases_do_not_overwrite_output() {
+    let dir = std::env::temp_dir().join(format!("misctool-path-test-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let out = dir.join("corpus.jsonl");
+    for exists in [false, true] {
+        if exists {
+            std::fs::write(&out, "existing corpus must not be touched\n").unwrap();
+        }
+        let output = cli()
+            .current_dir(&dir)
+            .args([
+                "review-corpus",
+                "collect",
+                "--login",
+                "cgwalters",
+                "--since",
+                "2020-01-01",
+                "--out",
+                "corpus.jsonl",
+                "--state",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("must be different files"));
+        if exists {
+            assert_eq!(
+                std::fs::read_to_string(&out).unwrap(),
+                "existing corpus must not be touched\n"
+            );
+        } else {
+            assert!(!out.exists());
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[cfg(unix)]
