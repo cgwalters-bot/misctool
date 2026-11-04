@@ -9,7 +9,7 @@ cargo install --path crates/misctool
 cgwalters-forge-misctool gh-pr-checks OWNER/REPO#123
 ```
 
-`gh-pr-checks` invokes `gh pr checks` once, preserving its output and exit
+`gh-pr-checks` runs `gh pr checks` once and keeps its output and exit
 status (0 passing, 1 failed, 8 pending). Install and authenticate the GitHub CLI
 first, or provide `GH_TOKEN` in the environment. It does not poll, write to
 GitHub or manage credentials. `--help` works without authentication.
@@ -25,37 +25,38 @@ cgwalters-forge-misctool review-corpus collect --login cgwalters --since 2020-11
 cgwalters-forge-misctool review-corpus stats review-corpus.jsonl
 ```
 
-`--since` is an inclusive UTC feedback-creation date. Discovery searches both
-`commenter:` and `reviewed-by:` on public PRs, partitioned by PR update month
+`--since` includes feedback created on or after that UTC date. Discovery searches
+both `commenter:` and `reviewed-by:` on public PRs, grouped by PR update month
 (including old PRs with recent feedback). Windows at the 1,000-result search
 cap split recursively down to seconds; an unsplittable or incomplete search
 fails instead of advancing the cursor. Every endpoint is paginated. Search
 index lag, deleted feedback and inaccessible repositories can limit coverage.
-Empty/whitespace-only reviews and comments are omitted, as are unsubmitted
-draft reviews and their inline comments visible through the caller's credentials.
+Reviews and comments that are empty or contain only whitespace are omitted.
+So are unsubmitted draft reviews and their inline comments visible through the
+caller's credentials.
 
-The optional state checkpoints each PR and update window. Rerun with the same
-login, date, output and state to resume; completed runs refresh from the cursor
+The optional state saves progress for each PR and update window. Rerun with the
+same login, date, output and state to resume; completed runs refresh from the cursor
 with a one-day overlap for indexing lag. Without state, discovery starts over
 and still merges into any existing output. Keep each login's corpus separate.
 Keep state and output together, use one writer, and do not edit state manually.
 Output is replaced before state advances, so interrupted processes can safely
-replay work. On Unix, file and directory synchronization also persist the
-replacement before advancing state; power-loss durability on other platforms
-is not guaranteed.
+repeat work. On Unix, synchronizing the file and directory also saves the
+replacement to disk before state advances. On other platforms, the replacement
+is not guaranteed to survive a power loss.
 A crash during file replacement can leave a `FILE.tmp`; remove that stale file
 before resuming. Previously collected records, including deleted comments, are
 retained; edited records replace the same kind/ID. Review bodies have no API
 update timestamp, so their `updated_at` falls back to `submitted_at`.
 
-The concrete failure bounded checks stop is silent truncation or an indefinitely
-retrying collector. Pagination is limited to 100 pages per list endpoint;
+Bounded checks prevent silent truncation and keep the collector from retrying
+indefinitely. Pagination is limited to 100 pages per list endpoint;
 rate-limit retries are limited to five per request, with at most one hour per
 wait. Primary and secondary limits honor `Retry-After` (seconds or HTTP date)
 and exhausted `X-RateLimit-Reset`, using the later deadline. Without a deadline,
 403/429 responses wait 60 seconds. Longer waits or exhausted retries fail with
-the saved cursor intact; resume later. There is no background refresh or GitHub
-write and no new credential handling.
+the saved cursor intact; resume later. The collector does not refresh in the
+background or write to GitHub, and it adds no credential handling.
 
 ### JSONL schema (version 1)
 
@@ -83,13 +84,13 @@ creation year, plus the total number of unique records.
 Outcomes are **evidence, not proof that the author complied**. An inline comment
 is anchored to its `original_commit_id` (or `commit_id` if the original is
 unavailable) in the PR's current commit list, so GitHub remapping a comment onto
-a later commit does not hide the intervening change. A subsequent
-commit with a committer time after the comment that lists the same path (or its
-previous name on rename) yields `file-changed-later`. With complete history and
-no such change it yields `no-later-change`. Missing anchors (including rebases),
+a later commit does not hide the intervening change. A later commit yields
+`file-changed-later` if its committer time is after the comment and it lists the
+same path (or its previous name on rename). With complete history and no such
+change, the outcome is `no-later-change`. Missing anchors (including rebases),
 PR-level feedback and incomplete histories yield `unknown`, unless a later
 change is positively observed. The 250-commit PR and 3,000-file commit API caps
-are treated as incomplete. Dates can be rewritten and file changes need not
+are treated as incomplete. Dates can be rewritten and file changes do not have to
 address feedback. This is not a thread-resolution or semantic-compliance test.
 
 Offline tests use reduced public API recordings from ostreedev/ostree#2253
@@ -109,11 +110,11 @@ Each subcommand lives in its own module and must have help and tests; see
 CI uses the shared workflow lint and read-only review policy. The review
 workflow loads `workflow/review.toml`, `workflow/review-command.toml` and
 `workflow/review.md` from the base branch, never privileged PR code. Real review
-submission remains off unless maintainers set `AGENT_REAL_REVIEWS=true` and
+submission stays off unless maintainers set `AGENT_REAL_REVIEWS=true` and
 configure the shared wrapper's repository variables. Configure branch rules
 to require CI and review approval with stale approvals dismissed; workflow
-files alone cannot enable that gate. Bootstrap of the new privileged trigger
-may require an owner ruleset bypass.
+files alone cannot enable that gate. Setting up the new privileged trigger
+may require an owner to bypass the ruleset.
 
 Push a `vVERSION` tag matching Cargo.toml to build a static
 `x86_64-unknown-linux-musl` binary, attach it to a release, and attest its
