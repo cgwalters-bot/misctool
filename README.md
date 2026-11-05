@@ -71,12 +71,16 @@ update timestamp, so their `updated_at` falls back to `submitted_at`.
 
 Bounded checks prevent silent truncation and keep the collector from retrying
 indefinitely. Pagination is limited to 100 pages per list endpoint;
-rate-limit retries are limited to five per request, with at most one hour per
-wait. Primary and secondary limits honor `Retry-After` (seconds or HTTP date)
-and exhausted `X-RateLimit-Reset`, using the later deadline. Without a deadline,
-403/429 responses wait 60 seconds. Longer waits or exhausted retries fail with
-the saved cursor intact; resume later. The collector does not refresh in the
-background or write to GitHub, and it adds no credential handling.
+rate-limit and transient-error retries share a limit of five per request, with
+at most one hour per wait. Primary and secondary limits honor `Retry-After`
+(seconds or HTTP date) and exhausted `X-RateLimit-Reset`, using the later deadline.
+Without a deadline,
+403/429 responses wait 60 seconds. HTTP 500, 502, 503 and 504 responses and failed
+gh invocations without a parsable HTTP status retry with exponential backoff
+(2, 4, 8, 16, then 32 seconds). Each retry is logged without headers or gh
+diagnostics; other 4xx responses fail immediately. Longer waits or exhausted
+retries fail with the saved cursor intact; resume later. The collector does not
+refresh in the background or write to GitHub, and it adds no credential handling.
 
 ### JSONL schema (version 1)
 

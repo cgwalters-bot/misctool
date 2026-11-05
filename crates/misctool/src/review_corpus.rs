@@ -261,28 +261,43 @@ fn request(
     mut sleep: impl FnMut(Duration),
 ) -> Result<Value> {
     for attempt in 0..=5 {
-        let output = invoke()?;
+        let output = invoke();
         // Do not print gh diagnostics or request headers: authentication stays in gh.
-        let (status, headers, body) = response(&output.stdout)
-            .map_err(|e| format!("{endpoint}: {e} (gh exit {})", output.status))?;
-        if matches!(status, 403 | 429) {
-            let wait = rate_wait(status, &headers, Utc::now().timestamp())?.unwrap();
-            if attempt == 5 {
-                return Err(format!(
-                    "{endpoint}: rate limit retry budget exhausted; rerun to resume"
-                ));
+        let parsed = match &output {
+            Ok(output) => match response(&output.stdout) {
+                Ok(parsed) => Some(parsed),
+                Err(e) if output.status.success() => return Err(format!("{endpoint}: {e}")),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        };
+        let (reason, wait) = match parsed {
+            Some((status, headers, body)) => {
+                if matches!(status, 403 | 429) {
+                    (
+                        "rate limit",
+                        rate_wait(status, &headers, Utc::now().timestamp())?.unwrap(),
+                    )
+                } else if matches!(status, 500 | 502 | 503 | 504) {
+                    ("transient server error", 2 << attempt)
+                } else {
+                    if !output.as_ref().unwrap().status.success() || !(200..300).contains(&status) {
+                        return Err(format!("GitHub GET {endpoint}: HTTP {status}"));
+                    }
+                    return serde_json::from_str(body)
+                        .map_err(|e| format!("{endpoint}: invalid JSON: {e}"));
+                }
             }
-            eprintln!(
-                "GitHub rate limit; waiting {wait}s (retry {}/5)",
-                attempt + 1
-            );
-            sleep(Duration::from_secs(wait));
-            continue;
+            None => ("gh failure without HTTP status", 2 << attempt),
+        };
+        // One budget bounds mixed rate-limit and transient failures alike.
+        if attempt == 5 {
+            return Err(format!(
+                "{endpoint}: {reason} retry budget exhausted; rerun to resume"
+            ));
         }
-        if !output.status.success() || !(200..300).contains(&status) {
-            return Err(format!("GitHub GET {endpoint}: HTTP {status}"));
-        }
-        return serde_json::from_str(body).map_err(|e| format!("{endpoint}: invalid JSON: {e}"));
+        eprintln!("GitHub {reason}; waiting {wait}s (retry {}/5)", attempt + 1);
+        sleep(Duration::from_secs(wait));
     }
     unreachable!()
 }
@@ -1246,9 +1261,119 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn gh_output(status: u16, headers: &str, body: &str) -> Output {
+        use std::os::unix::process::ExitStatusExt;
+        Output {
+            status: std::process::ExitStatus::from_raw(if status == 200 { 0 } else { 256 }),
+            stdout: if status == 0 {
+                body.as_bytes().to_vec()
+            } else {
+                format!("HTTP/2.0 {status}\r\n{headers}\r\n{body}").into_bytes()
+            },
+            stderr: b"gh diagnostics must not be printed".to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transient_retries() {
+        // Zero represents a failed invocation with no parsable HTTP status.
+        for (statuses, expected_waits, error) in [
+            (vec![503, 200], vec![2], None),
+            (vec![500, 200], vec![2], None),
+            (vec![502, 200], vec![2], None),
+            (vec![504, 200], vec![2], None),
+            (
+                vec![502; 6],
+                vec![2, 4, 8, 16, 32],
+                Some("retry budget exhausted"),
+            ),
+            (vec![404], vec![], Some("HTTP 404")),
+            (vec![401], vec![], Some("HTTP 401")),
+            (vec![422], vec![], Some("HTTP 422")),
+            (vec![0, 200], vec![2], None),
+            (
+                vec![0; 6],
+                vec![2, 4, 8, 16, 32],
+                Some("retry budget exhausted"),
+            ),
+            (
+                vec![429, 503, 403, 502, 504, 500],
+                vec![1, 4, 1, 16, 32],
+                Some("retry budget exhausted"),
+            ),
+        ] {
+            let mut replies: VecDeque<_> = statuses
+                .iter()
+                .map(|status| gh_output(*status, "Retry-After: 1\r\n", "{\"ok\":true}"))
+                .collect();
+            let mut waits = Vec::new();
+            let result = request(
+                "fixture",
+                || Ok(replies.pop_front().unwrap()),
+                |d| waits.push(d.as_secs()),
+            );
+            if let Some(error) = error {
+                let actual = result.unwrap_err();
+                assert!(actual.contains(error), "{statuses:?}: {actual}");
+                if error == "retry budget exhausted" {
+                    assert!(actual.contains("rerun to resume"));
+                }
+            } else {
+                assert_eq!(result.unwrap(), json!({"ok":true}), "{statuses:?}");
+            }
+            assert_eq!(waits, expected_waits, "{statuses:?}");
+            assert!(replies.is_empty(), "{statuses:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transient_failure_preserves_pending_state() {
+        struct FailingApi(Mock);
+        impl Api for FailingApi {
+            fn get(&mut self, endpoint: &str, fields: &[(&str, String)]) -> Result<Value> {
+                if endpoint == "search/issues" {
+                    self.0.get(endpoint, fields)
+                } else {
+                    request(endpoint, || Ok(gh_output(503, "", "{}")), |_| {})
+                }
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!("misctool-transient-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let opts = Options {
+            login: "cgwalters".into(),
+            since: "2020-12-01".parse().unwrap(),
+            out: dir.join("corpus.jsonl"),
+            state: Some(dir.join("state.json")),
+        };
+        let now = date("2020-12-20T00:00:00Z");
+        let mut api = FailingApi(Mock::new(vec![
+            ("search/issues", search_result()),
+            ("search/issues", search_result()),
+        ]));
+        let error = collect(&mut api, &opts, now).unwrap_err();
+        assert!(error.contains("retry budget exhausted; rerun to resume"));
+        let state = load_state(&opts).unwrap();
+        assert_eq!(state.cursor, midnight(opts.since));
+        let work = state.work.unwrap();
+        assert_eq!(work.end, now);
+        assert_eq!(work.pending, [pr()]);
+        assert!(load_records(&opts.out).unwrap().is_empty());
+        // Resume uses the saved pending PR without repeating discovery.
+        let mut api = Mock::new(pr_replies(false));
+        collect(&mut api, &opts, now).unwrap();
+        assert!(api.replies.is_empty());
+        assert_eq!(load_state(&opts).unwrap().cursor, now);
+        assert_eq!(load_records(&opts.out).unwrap().len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
     #[test]
     fn gh_get_arguments_and_rate_limit_retries() {
-        use std::os::unix::process::ExitStatusExt;
         let command = gh_command(
             "search/issues",
             &[("q", "is:public commenter:cgwalters".into())],
@@ -1268,15 +1393,10 @@ mod tests {
                 "q=is:public commenter:cgwalters"
             ]
         );
-        let output = |status, headers: &str, body| Output {
-            status: std::process::ExitStatus::from_raw(if status == 200 { 0 } else { 256 }),
-            stdout: format!("HTTP/2.0 {status}\r\n{headers}\r\n{body}").into_bytes(),
-            stderr: Vec::new(),
-        };
         let mut replies = VecDeque::from([
-            output(429, "Retry-After: 2\r\n", "{}"),
-            output(403, "Retry-After: 3\r\n", "{}"),
-            output(200, "", "{\"ok\":true}"),
+            gh_output(429, "Retry-After: 2\r\n", "{}"),
+            gh_output(403, "Retry-After: 3\r\n", "{}"),
+            gh_output(200, "", "{\"ok\":true}"),
         ]);
         let mut waits = Vec::new();
         let result = request(
@@ -1294,7 +1414,7 @@ mod tests {
             "fixture",
             || {
                 calls += 1;
-                Ok(output(429, "Retry-After: 1\r\n", "{}"))
+                Ok(gh_output(429, "Retry-After: 1\r\n", "{}"))
             },
             |d| waits.push(d.as_secs()),
         )
@@ -1303,7 +1423,14 @@ mod tests {
         assert_eq!(calls, 6);
         assert_eq!(waits, [1; 5]);
         let mut waits = Vec::new();
-        assert!(request("fixture", || Ok(output(404, "", "{}")), |d| waits.push(d)).is_err());
+        assert!(
+            request(
+                "fixture",
+                || Ok(gh_output(404, "", "{}")),
+                |d| waits.push(d)
+            )
+            .is_err()
+        );
         assert!(waits.is_empty());
     }
 
