@@ -1,4 +1,5 @@
 mod acp_tools;
+mod architecture_review;
 mod gh_pr_checks;
 mod operator_issue_diff;
 mod review_corpus;
@@ -10,6 +11,7 @@ const HELP: &str = "Small, read-only tools for operator workflows.
 Usage: cgwalters-forge-misctool <COMMAND>
 
 Commands:
+  architecture-review                Discover held-out PRs and build or verify packets
   acp-tools -- ADAPTER...            List the commands an ACP adapter offers
   gh-pr-checks OWNER/REPO#N          Show a pull request's checks using gh
   operator-issue-diff OWNER/REPO#N   Diff the last two edits of an issue body
@@ -31,6 +33,7 @@ fn run() -> Result<u8, String> {
             Ok(0)
         }
         Some("acp-tools") => acp_tools::run(&args[1..]),
+        Some("architecture-review") => architecture_review::run(&args[1..]),
         Some("gh-pr-checks") => gh_pr_checks::run(&args[1..]),
         Some("operator-issue-diff") => operator_issue_diff::run(&args[1..]),
         Some("review-corpus") => review_corpus::run(&args[1..]),

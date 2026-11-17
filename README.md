@@ -121,6 +121,68 @@ Offline tests use reduced public API recordings from ostreedev/ostree#2253
 (comment 545915657 and reviews 555323914/555595509), plus explicit mutations for
 edge cases. Live corpus output is not checked into this repository.
 
+## Architecture review
+
+`architecture-review` is opt-in tooling for feedback-isolated historical review
+inputs. It uses authenticated `gh api` GET requests against github.com, with no
+inference, posting or release publication. Repositories, login and exclusions
+come from explicit arguments, not a built-in evaluation sample.
+
+```sh
+cgwalters-forge-misctool architecture-review discover --login REVIEWER --repos OWNER/REPO,OTHER/REPO --since 2025-01-01 --exclude OWNER/REPO#12,OTHER/REPO#34 --out candidates.json
+cgwalters-forge-misctool architecture-review packet build --pr OWNER/REPO#56 --login REVIEWER --base RECORDED_BASE_SHA --out packet --manifest packet.json --max-files 30 --max-bytes 100000
+cgwalters-forge-misctool architecture-review packet verify --dir packet --manifest packet.json
+cgwalters-forge-misctool architecture-review frozen verify --revision HEAD --manifest frozen.json --repo .
+```
+
+Discovery writes a JSON array of `repository`, `number`, `first_review_at` and
+`reviewed_revision`. It searches other people's PRs reviewed by the login, then
+checks actual submitted review dates (inclusive UTC `--since`); a later qualifying
+review does not change the earliest-review anchor. Draft reviews are ignored.
+Search index lag, deleted reviews and inaccessible history can limit coverage.
+Incomplete searches or more than 1,000 results per repository fail; narrow the
+date range rather than silently lose candidates. List endpoints stop at 100
+pages of 100; failures do not produce partial output. No automatic retries.
+
+Build uses the commit named by the earliest submitted review. The required
+`--base` is a full SHA from the caller's frozen historical record. Do not use
+today's PR base: it may already contain reviewed changes and silently shrink the
+diff. Build requires that the supplied base is the comparison's merge-base; it
+cannot independently prove that the caller recorded the correct historical base.
+Comparisons at GitHub's 300-file or 250-commit caps, incomplete commit lists,
+and post-review committer dates are refused. Rewritten history may be unavailable;
+timestamps are evidence, not proof of historical availability. Current PR titles,
+descriptions, comments and project guidance are deliberately not included.
+
+The complete UTF-8 diff, annotated with new-side line numbers, is mandatory.
+Git parses the diff without applying it; file names and addition/deletion counts
+must exactly match the comparison, including removals.
+If it cannot fit, no packet is built. Optional changed-file sources at the same
+revision are sorted by byte size then UTF-8 path bytes, flattened into `head/`
+with `/` replaced by `__`, and included whole while both limits permit. Colliding
+names fail; binary or over-budget sources are omitted and recorded, not truncated.
+Sources use Git blob responses, not contents responses that can dereference
+symlinks: symlink sources contain the link text. Unavailable or truncated blob
+responses fail. Defaults are 30 files and 100000
+bytes, including `diff.patch` but excluding the external manifest.
+
+The controller-only `architecture-review.packet.v1` manifest records provenance,
+limits, omissions, total bytes, and each file's `name`, `bytes` and `sha256`.
+Keep it outside the reviewer's packet: only the packet files are reviewer inputs.
+Build stages and verifies before publishing to new destinations; existing packet
+directories and manifests are never overwritten. Verification checks exact file
+sets and byte hashes, rejecting extra files/directories and symlinks. It checks
+integrity against the supplied manifest, not independent provenance or selection.
+Use one writer and do not modify a directory concurrently with verification.
+
+Frozen verification takes a separate manifest:
+`{"files":[{"path":"docs/prompt.md","sha256":"<64 lowercase hex digits>"}]}`.
+It resolves the requested git revision to a commit and hashes `git show REV:PATH`
+bytes, ignoring working-tree changes. Paths must be relative without traversal;
+duplicates and empty manifests fail. Verification succeeds with exit 0; refusals,
+mismatches and retrieval errors exit 2. Tests use synthetic API fixtures and a
+temporary local git repository, never the network.
+
 ## Development
 
 Run `just check` (formatting, Clippy with warnings denied, and tests).

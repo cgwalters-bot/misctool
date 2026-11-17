@@ -4,6 +4,170 @@ fn cli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_cgwalters-forge-misctool"))
 }
 
+#[cfg(unix)]
+#[test]
+fn architecture_review_cli_with_offline_gh() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let data: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/architecture-review.json")).unwrap();
+    for key in ["search", "reviews", "comparison", "content"] {
+        std::fs::write(
+            temp.path().join(key),
+            serde_json::to_vec(&data[key]).unwrap(),
+        )
+        .unwrap();
+    }
+    std::fs::write(temp.path().join("diff"), data["diff"].as_str().unwrap()).unwrap();
+    let gh = temp.path().join("gh");
+    std::fs::write(&gh, "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$CAPTURE\"\ncase \"$6:$8\" in\nsearch/issues*) file=search;;\n*/reviews*) file=reviews;;\n*/compare/*:Accept:*diff) file=diff;;\n*/compare/*) file=comparison;;\n*/git/blobs/*) file=content;;\n*) exit 9;;\nesac; /bin/cat \"$FIXTURE_DATA/$file\"\n").unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let invoke = |args: &[&str]| {
+        cli()
+            .current_dir(temp.path())
+            .env("PATH", &path)
+            .env("CAPTURE", temp.path().join("calls"))
+            .env("FIXTURE_DATA", temp.path())
+            .arg("architecture-review")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = invoke(&[
+        "discover",
+        "--login",
+        "reviewer",
+        "--repos",
+        "o/r",
+        "--since",
+        "2025-03-01",
+        "--exclude",
+        "O/R#2",
+        "--out",
+        "candidates.json",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let candidates: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.path().join("candidates.json")).unwrap())
+            .unwrap();
+    assert_eq!(candidates.as_array().unwrap().len(), 1);
+    let output = invoke(&[
+        "packet",
+        "build",
+        "--pr",
+        "o/r#1",
+        "--login",
+        "reviewer",
+        "--base",
+        "1111111111111111111111111111111111111111",
+        "--out",
+        "packet",
+        "--manifest",
+        "manifest.json",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        invoke(&[
+            "packet",
+            "verify",
+            "--dir",
+            "packet",
+            "--manifest",
+            "manifest.json"
+        ])
+        .status
+        .success()
+    );
+    std::fs::write(temp.path().join("packet/extra"), "feedback").unwrap();
+    assert_eq!(
+        invoke(&[
+            "packet",
+            "verify",
+            "--dir",
+            "packet",
+            "--manifest",
+            "manifest.json"
+        ])
+        .status
+        .code(),
+        Some(2)
+    );
+    let calls = std::fs::read_to_string(temp.path().join("calls")).unwrap();
+    assert!(calls.starts_with("api\n--hostname\ngithub.com\n--method\nGET\n"));
+    assert!(!calls.contains("POST") && !calls.contains("/contents/"));
+    // A valid-looking diff missing the removed file must publish neither output.
+    std::fs::write(
+        temp.path().join("diff"),
+        data["diff"]
+            .as_str()
+            .unwrap()
+            .split("diff --git a/old")
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let output = invoke(&[
+        "packet",
+        "build",
+        "--pr",
+        "o/r#1",
+        "--login",
+        "reviewer",
+        "--base",
+        "1111111111111111111111111111111111111111",
+        "--out",
+        "failed",
+        "--manifest",
+        "failed.json",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!temp.path().join("failed").exists() && !temp.path().join("failed.json").exists());
+
+    let git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .current_dir(temp.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    git(&["init", "-q"]);
+    std::fs::write(temp.path().join("prompt"), "abc").unwrap();
+    git(&["add", "prompt"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "fixture",
+    ]);
+    std::fs::write(temp.path().join("frozen.json"), r#"{"files":[{"path":"prompt","sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}"#).unwrap();
+    std::fs::write(temp.path().join("prompt"), "dirty").unwrap();
+    assert!(
+        invoke(&[
+            "frozen",
+            "verify",
+            "--revision",
+            "HEAD",
+            "--manifest",
+            "frozen.json"
+        ])
+        .status
+        .success()
+    );
+}
+
 #[test]
 fn help_and_invalid_arguments() {
     for (args, expected) in [
@@ -18,17 +182,27 @@ fn help_and_invalid_arguments() {
         assert!(String::from_utf8_lossy(&output.stdout).contains(expected));
     }
     for args in [
+        vec!["architecture-review", "--help"],
+        vec!["architecture-review", "discover", "--help"],
+        vec!["architecture-review", "packet", "build", "--help"],
+        vec!["architecture-review", "packet", "verify", "--help"],
+        vec!["architecture-review", "frozen", "verify", "--help"],
         vec!["review-corpus", "--help"],
         vec!["review-corpus", "collect", "--help"],
         vec!["review-corpus", "stats", "--help"],
     ] {
         let output = cli().args(args).output().unwrap();
         assert!(output.status.success());
-        assert!(String::from_utf8_lossy(&output.stdout).contains("review-corpus"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("review"));
     }
     for args in [
         vec![],
         vec!["unknown"],
+        vec!["architecture-review"],
+        vec!["architecture-review", "discover"],
+        vec!["architecture-review", "packet", "build"],
+        vec!["architecture-review", "packet", "verify"],
+        vec!["architecture-review", "frozen", "verify"],
         vec!["review-corpus"],
         vec!["review-corpus", "collect"],
         vec!["review-corpus", "stats"],

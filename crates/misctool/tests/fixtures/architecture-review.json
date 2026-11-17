@@ -1,0 +1,19 @@
+{
+  "reviews": [
+    {"user":{"login":"reviewer"},"state":"PENDING","submitted_at":null},
+    {"user":{"login":"other"},"state":"COMMENTED","submitted_at":"2025-01-01T00:00:00Z","commit_id":"3333333333333333333333333333333333333333"},
+    {"user":{"login":"reviewer"},"state":"COMMENTED","submitted_at":"2025-03-01T00:00:00Z","commit_id":"3333333333333333333333333333333333333333"},
+    {"user":{"login":"REVIEWER"},"state":"CHANGES_REQUESTED","submitted_at":"2025-02-01T00:00:00Z","commit_id":"2222222222222222222222222222222222222222"}
+  ],
+  "pull": {"base":{"sha":"1111111111111111111111111111111111111111"},"head":{"sha":"3333333333333333333333333333333333333333"},"body":"later feedback must not enter packet"},
+  "comparison": {
+    "status":"ahead",
+    "merge_base_commit":{"sha":"1111111111111111111111111111111111111111"},
+    "total_commits":1,
+    "commits":[{"sha":"2222222222222222222222222222222222222222","commit":{"committer":{"date":"2025-01-31T00:00:00Z"}}}],
+    "files":[{"filename":"src/a.rs","status":"modified","sha":"4444444444444444444444444444444444444444","additions":1,"deletions":1},{"filename":"old","status":"removed","additions":0,"deletions":1}]
+  },
+  "diff":"diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/old b/old\ndeleted file mode 100644\n--- a/old\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n",
+  "content":{"type":"file","encoding":"base64","size":4,"content":"bmV3Cg==\n"},
+  "search":{"total_count":2,"incomplete_results":false,"items":[{"number":1},{"number":2}]}
+}
