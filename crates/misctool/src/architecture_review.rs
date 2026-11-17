@@ -491,9 +491,13 @@ fn validate_diff(diff: &[u8], files: &[Value]) -> Result<()> {
     input.seek(SeekFrom::Start(0)).map_err(io)?;
     // In a repository subdirectory git apply silently skips other paths.
     // Parse outside any checkout, with no working-tree or index access.
+    // TMPDIR can itself be inside a checkout. An explicit, empty GIT_DIR
+    // prevents enclosing repository discovery, even for paths containing ':',
+    // which cannot be represented as a GIT_CEILING_DIRECTORIES entry.
     let directory = tempfile::tempdir().map_err(io)?;
     let output = Command::new("git")
         .current_dir(directory.path())
+        .env("GIT_DIR", directory.path())
         .args(["apply", "--numstat", "-z", "--"])
         .stdin(Stdio::from(input))
         .output()

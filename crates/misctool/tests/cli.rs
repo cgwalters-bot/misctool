@@ -9,6 +9,20 @@ fn cli() -> Command {
 fn architecture_review_cli_with_offline_gh() {
     use std::os::unix::fs::PermissionsExt;
     let temp = tempfile::tempdir().unwrap();
+    // ':' is legal in TMPDIR but splits Git's ceiling-directory path list.
+    let tmpdir = temp.path().join("tmp:inside-checkout");
+    std::fs::create_dir(&tmpdir).unwrap();
+    let git = |args: &[&str]| {
+        assert!(
+            Command::new("git")
+                .current_dir(temp.path())
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    git(&["init", "-q"]);
     let data: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/architecture-review.json")).unwrap();
     for key in ["search", "reviews", "comparison", "content"] {
@@ -30,6 +44,8 @@ fn architecture_review_cli_with_offline_gh() {
     let invoke = |args: &[&str]| {
         cli()
             .current_dir(temp.path())
+            // Regression: temporary diff parsing directories are inside a checkout.
+            .env("TMPDIR", &tmpdir)
             .env("PATH", &path)
             .env("CAPTURE", temp.path().join("calls"))
             .env("FIXTURE_DATA", temp.path())
@@ -100,45 +116,32 @@ fn architecture_review_cli_with_offline_gh() {
     let calls = std::fs::read_to_string(temp.path().join("calls")).unwrap();
     assert!(calls.starts_with("api\n--hostname\ngithub.com\n--method\nGET\n"));
     assert!(!calls.contains("POST") && !calls.contains("/contents/"));
-    // A valid-looking diff missing the removed file must publish neither output.
-    std::fs::write(
-        temp.path().join("diff"),
-        data["diff"]
-            .as_str()
-            .unwrap()
-            .split("diff --git a/old")
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
-    let output = invoke(&[
-        "packet",
-        "build",
-        "--pr",
-        "o/r#1",
-        "--login",
-        "reviewer",
-        "--base",
-        "1111111111111111111111111111111111111111",
-        "--out",
-        "failed",
-        "--manifest",
-        "failed.json",
-    ]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(!temp.path().join("failed").exists() && !temp.path().join("failed.json").exists());
+    // Neither a missing file nor a truncated hunk may publish either output,
+    // even when TMPDIR is inside a checkout.
+    let diff = data["diff"].as_str().unwrap();
+    for incomplete in [
+        diff.split("diff --git a/old").next().unwrap(),
+        &diff[..diff.len() - 2],
+    ] {
+        std::fs::write(temp.path().join("diff"), incomplete).unwrap();
+        let output = invoke(&[
+            "packet",
+            "build",
+            "--pr",
+            "o/r#1",
+            "--login",
+            "reviewer",
+            "--base",
+            "1111111111111111111111111111111111111111",
+            "--out",
+            "failed",
+            "--manifest",
+            "failed.json",
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!temp.path().join("failed").exists() && !temp.path().join("failed.json").exists());
+    }
 
-    let git = |args: &[&str]| {
-        assert!(
-            Command::new("git")
-                .current_dir(temp.path())
-                .args(args)
-                .status()
-                .unwrap()
-                .success()
-        );
-    };
-    git(&["init", "-q"]);
     std::fs::write(temp.path().join("prompt"), "abc").unwrap();
     git(&["add", "prompt"]);
     git(&[
